@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>World Explorer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script src="https://unpkg.com/globe.gl"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: linear-gradient(135deg, #18181b 0%, #0f172a 100%);
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        }
+        #globeViz {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            inset: 0;
+            z-index: 0;
+        }
+        .glass-card {
+            background: rgba(30, 41, 59, 0.9);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.3);
+            border-radius: 1.25rem;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .sidebar {
+            position: absolute;
+            top: 1rem;
+            left: 1rem;
+            min-width: 220px;
+            max-width: 80vw;
+            z-index: 10;
+            transition: box-shadow 0.2s;
+            padding: 1.25rem !important;
+        }
+        .sidebar h1 {
+            letter-spacing: -0.02em;
+            font-size: 1.25rem;
+        }
+        .country-info {
+            position: absolute;
+            bottom: 1.5rem;
+            right: 1.5rem;
+            z-index: 10;
+            max-width: 280px;
+            min-width: 160px;
+            transition: box-shadow 0.2s;
+            padding: 1rem !important;
+        }
+        .hidden {
+            display: none !important;
+        }
+        .btn {
+            transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+            box-shadow: 0 2px 8px 0 rgba(31, 38, 135, 0.08);
+            font-size: 0.95rem;
+            padding: 0.4rem 0.9rem;
+        }
+        .btn:active {
+            transform: scale(0.97);
+        }
+        .btn:focus {
+            outline: 2px solid #818cf8;
+            outline-offset: 2px;
+        }
+        .loading-spinner {
+            border: 4px solid rgba(255,255,255,0.15);
+            border-top: 4px solid #818cf8;
+            border-radius: 50%;
+            width: 36px;
+            height: 36px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg);}
+            100% { transform: rotate(360deg);}
+        }
+        @media (max-width: 640px) {
+            .sidebar {
+                left: 50%;
+                top: 0.5rem;
+                transform: translateX(-50%);
+                min-width: 95vw;
+                max-width: 98vw;
+                padding: 0.7rem !important;
+            }
+            .country-info {
+                right: 50%;
+                bottom: 0.5rem;
+                transform: translateX(50%);
+                min-width: 90vw;
+                max-width: 98vw;
+                padding: 0.7rem !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="globeViz"></div>
+    <div class="sidebar glass-card shadow-xl">
+        <h1 class="font-extrabold mb-1 text-white flex items-center gap-2" style="font-size:1.1rem;">
+            <svg class="w-6 h-6 text-violet-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M2 12h20M12 2a15.3 15.3 0 010 20M12 2a15.3 15.3 0 000 20" stroke="currentColor" stroke-width="2"/></svg>
+            World Explorer
+        </h1>
+        <!-- Search bar -->
+        <div class="mb-2">
+            <input id="countrySearch" type="text" placeholder="Search country..." class="w-full px-2 py-1 rounded bg-slate-800 text-slate-100 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400" autocomplete="off" />
+            <ul id="searchResults" class="bg-slate-900 rounded mt-1 text-xs text-slate-200 max-h-32 overflow-y-auto hidden"></ul>
+        </div>
+        <p class="text-xs text-slate-300 mb-2">Track your travels and explore the globe.</p>
+        <div class="stats flex flex-col gap-1 mb-2">
+            <div class="flex items-center gap-1">
+                <span class="text-slate-400 text-xs">Visited:</span>
+                <span id="visitedCount" class="font-semibold text-violet-400 text-sm">0</span>
+                <span class="text-slate-400 text-xs">countries</span>
+            </div>
+            <div class="flex items-center gap-1">
+                <span class="text-slate-400 text-xs">Earth covered:</span>
+                <span id="areaPercentage" class="font-semibold text-violet-400 text-sm">0</span>
+                <span class="text-slate-400 text-xs">%</span>
+            </div>
+        </div>
+        <div class="flex gap-1 mt-1">
+            <button id="rotateBtn" class="btn bg-blue-600 hover:bg-blue-700 text-white rounded-lg focus:ring-2 focus:ring-blue-400 focus:outline-none transition">
+                Start Rotation
+            </button>
+            <button id="resetBtn" class="btn bg-red-600 hover:bg-red-700 text-white rounded-lg focus:ring-2 focus:ring-red-400 focus:outline-none transition">
+                Reset
+            </button>
+            <button id="shareBtn" class="btn bg-violet-600 hover:bg-violet-700 text-white rounded-lg focus:ring-2 focus:ring-violet-400 focus:outline-none transition" title="Share your progress">
+                Share
+            </button>
+        </div>
+        <!-- Texture selection -->
+        <div class="mt-3">
+            <label class="block text-xs text-slate-400 mb-1">Globe Texture:</label>
+            <select id="textureSelect" class="w-full px-2 py-1 rounded bg-slate-800 text-slate-100 text-xs focus:outline-none focus:ring-2 focus:ring-violet-400">
+                <option value="none">No Texture (Space)</option>
+                <option value="earth">Earth (Blue Marble)</option>
+            </select>
+        </div>
+        
+        <!-- Visited countries list -->
+        <div class="mt-3 text-xs text-slate-400 opacity-80">
+            <span>Tip: Click a country to toggle visited.</span>
+        </div>
+        <div class="mt-2">
+            <button id="toggleVisitedList" class="text-xs text-violet-400 hover:underline focus:outline-none">Show visited countries</button>
+            <ul id="visitedList" class="hidden mt-1 max-h-32 overflow-y-auto text-xs text-slate-200"></ul>
+        </div>
+    </div>
+    <div id="countryInfo" class="country-info glass-card shadow-lg hidden"></div>
+    <div id="loading" class="fixed inset-0 flex items-center justify-center bg-black bg-opacity-60 z-50">
+        <div>
+            <div class="loading-spinner"></div>
+            <div class="mt-4 text-slate-200 text-base font-semibold text-center">Loading globe...</div>
+        </div>
+    </div>
+    <script>
+        // Initialize variables
+        const visitedCountries = new Set(JSON.parse(localStorage.getItem('visitedCountries') || '[]'));
+        const visitedCountElement = document.getElementById('visitedCount');
+        const areaPercentageElement = document.getElementById('areaPercentage');
+        const countryInfoElement = document.getElementById('countryInfo');
+        let totalLandArea = 0;
+        let countryFeatures = [];
+        let searchTimeout;
+
+        function updateVisitedStats(features) {
+            if (!features?.length) return;
+            if (!totalLandArea) totalLandArea = features.length;
+            const visitedCount = visitedCountries.size;
+            const percentage = ((visitedCount / totalLandArea) * 100).toFixed(1);
+            visitedCountElement.textContent = visitedCount;
+            areaPercentageElement.textContent = percentage;
+            localStorage.setItem('visitedCountries', JSON.stringify([...visitedCountries]));
+            updateVisitedList();
+        }
+
+        // Visited countries list
+        function updateVisitedList() {
+            const list = document.getElementById('visitedList');
+            list.innerHTML = '';
+            if (visitedCountries.size === 0) {
+                list.innerHTML = '<li class="text-slate-500">No countries visited yet.</li>';
+                return;
+            }
+            [...visitedCountries].sort().forEach(name => {
+                const li = document.createElement('li');
+                li.textContent = name;
+                li.className = "py-0.5 px-1 hover:bg-slate-700 rounded cursor-pointer";
+                li.onclick = () => {
+                    // Focus globe on country
+                    const feat = countryFeatures.find(f => f.properties.ADMIN === name);
+                    if (feat) {
+                        const coords = getCountryCenter(feat);
+                        world.pointOfView({ lat: coords[1], lng: coords[0], altitude: 1.5 }, 1000);
+                        world.polygonAltitude(d => d === feat ? 0.06 : (visitedCountries.has(d?.properties?.ADMIN) ? 0.025 : 0.012));
+                        setTimeout(() => world.polygonAltitude(d => (visitedCountries.has(d?.properties?.ADMIN) ? 0.025 : 0.012)), 1200);
+                    }
+                };
+                list.appendChild(li);
+            });
+        }
+
+        document.getElementById('toggleVisitedList').onclick = () => {
+            const list = document.getElementById('visitedList');
+            if (list.classList.contains('hidden')) {
+                list.classList.remove('hidden');
+                document.getElementById('toggleVisitedList').textContent = 'Hide visited countries';
+            } else {
+                list.classList.add('hidden');
+                document.getElementById('toggleVisitedList').textContent = 'Show visited countries';
+            }
+        };
+
+        // Search functionality
+        const countrySearch = document.getElementById('countrySearch');
+        const searchResults = document.getElementById('searchResults');
+        countrySearch.addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            const query = this.value.trim().toLowerCase();
+            if (!query || !countryFeatures.length) {
+                searchResults.classList.add('hidden');
+                searchResults.innerHTML = '';
+                return;
+            }
+            searchTimeout = setTimeout(() => {
+                const matches = countryFeatures.filter(f => f.properties.ADMIN.toLowerCase().includes(query));
+                if (matches.length === 0) {
+                    searchResults.innerHTML = '<li class="px-2 py-1 text-slate-500">No matches</li>';
+                } else {
+                    searchResults.innerHTML = matches.slice(0, 10).map(f =>
+                        `<li class="px-2 py-1 hover:bg-violet-700 cursor-pointer rounded" data-country="${f.properties.ADMIN}">${f.properties.ADMIN}</li>`
+                    ).join('');
+                }
+                searchResults.classList.remove('hidden');
+            }, 120);
+        });
+        searchResults.addEventListener('mousedown', function(e) {
+            if (e.target.dataset.country) {
+                const name = e.target.dataset.country;
+                countrySearch.value = name;
+                searchResults.classList.add('hidden');
+                // Focus globe on country
+                const feat = countryFeatures.find(f => f.properties.ADMIN === name);
+                if (feat) {
+                    const coords = getCountryCenter(feat);
+                    world.pointOfView({ lat: coords[1], lng: coords[0], altitude: 1.5 }, 1000);
+                    world.polygonAltitude(d => d === feat ? 0.06 : (visitedCountries.has(d?.properties?.ADMIN) ? 0.025 : 0.012));
+                    setTimeout(() => world.polygonAltitude(d => (visitedCountries.has(d?.properties?.ADMIN) ? 0.025 : 0.012)), 1200);
+                }
+            }
+        });
+        document.addEventListener('click', e => {
+            if (!countrySearch.contains(e.target) && !searchResults.contains(e.target)) {
+                searchResults.classList.add('hidden');
+            }
+        });
+
+        // Share progress
+        document.getElementById('shareBtn').onclick = () => {
+            const params = new URLSearchParams();
+            params.set('visited', [...visitedCountries].map(encodeURIComponent).join(','));
+            const url = `${location.origin}${location.pathname}?${params.toString()}`;
+            navigator.clipboard.writeText(url).then(() => {
+                document.getElementById('shareBtn').textContent = 'Copied!';
+                setTimeout(() => document.getElementById('shareBtn').textContent = 'Share', 1200);
+            });
+        };
+
+        // Load visited from URL
+        function loadVisitedFromURL() {
+            const params = new URLSearchParams(location.search);
+            if (params.has('visited')) {
+                visitedCountries.clear();
+                params.get('visited').split(',').map(decodeURIComponent).forEach(c => visitedCountries.add(c));
+            }
+        }
+        loadVisitedFromURL();
+
+        // Helper: get country center
+        function getCountryCenter(feature) {
+            // Use centroid of first polygon
+            const coords = feature.geometry.coordinates;
+            let poly = coords[0];
+            if (feature.geometry.type === "MultiPolygon") poly = coords[0][0];
+            let lng = 0, lat = 0, n = poly.length;
+            for (let i = 0; i < n; i++) {
+                lng += poly[i][0];
+                lat += poly[i][1];
+            }
+            return [lng / n, lat / n];
+        }
+
+        // --- Country Flags ---
+        async function getCountryFlag(admin) {
+            // Use REST Countries API for flag
+            try {
+                const resp = await fetch(`https://restcountries.com/v3.1/name/${encodeURIComponent(admin)}?fields=flags`);
+                const data = await resp.json();
+                return data[0]?.flags?.svg || '';
+            } catch { return ''; }
+        }
+
+        const world = Globe()
+            .globeImageUrl(null)
+            .backgroundColor('#0f172a')
+            .atmosphereColor('#818cf8')
+            .atmosphereAltitude(0)  // Keep atmosphere off
+            .polygonsData([])
+            .polygonAltitude(d => visitedCountries.has(d?.properties?.ADMIN) ? 0.025 : 0.012)
+            .polygonCapColor(d => 
+                visitedCountries.has(d?.properties?.ADMIN)
+                    ? 'rgba(139, 92, 246, 0.95)'
+                    : 'rgba(226, 232, 240, 0.12)'
+            )
+            .polygonSideColor(() => '#1e293b')
+            .polygonStrokeColor(() => 'rgba(129, 140, 248, 0.9)') // Very visible border color
+            .onPolygonHover(async hoverD => {
+                world.polygonAltitude(d => d === hoverD ? 0.06 : (visitedCountries.has(d?.properties?.ADMIN) ? 0.025 : 0.012));
+                if (hoverD) {
+                    countryInfoElement.classList.remove('hidden');
+                    let flagUrl = await getCountryFlag(hoverD.properties.ADMIN);
+                    countryInfoElement.innerHTML = `
+                        <div class="flex items-center gap-2 mb-1">
+                            <h2 class="font-bold text-base text-white">${hoverD.properties.ADMIN}</h2>
+                            ${flagUrl ? `<img src="${flagUrl}" alt="flag" class="w-7 h-5 rounded shadow border border-slate-700">` : ''}
+                        </div>
+                        <p class="text-sm mt-1 mb-2">${visitedCountries.has(hoverD.properties.ADMIN) 
+                            ? '<span class="text-violet-400">✅ Visited</span>' 
+                            : '<span class="text-slate-400">🔸 Not visited</span>'}</p>
+                        <div class="text-xs text-slate-400 opacity-80 mb-2">Click to toggle visited status.</div>
+                        <div class="flex flex-wrap gap-2 mt-2">
+                            <span class="bg-slate-700 text-slate-200 rounded px-2 py-1 text-xs">Country</span>
+                        </div>
+                    `;
+                } else {
+                    countryInfoElement.classList.add('hidden');
+                }
+            })
+            .onPolygonClick(clickedCountry => {
+                if (clickedCountry?.properties?.ADMIN) {
+                    const countryName = clickedCountry.properties.ADMIN;
+                    if (visitedCountries.has(countryName)) {
+                        visitedCountries.delete(countryName);
+                    } else {
+                        visitedCountries.add(countryName);
+                    }
+                    updateVisitedStats(world.polygonsData());
+                    world.polygonCapColor(world.polygonCapColor());
+                }
+            })(document.getElementById('globeViz'));
+
+        // Ensure auto-rotation is disabled by default
+        world.controls().autoRotate = false;
+        world.controls().autoRotateSpeed = 0.5;
+        let autoRotate = false;
+
+        document.getElementById('rotateBtn').addEventListener('click', () => {
+            autoRotate = !autoRotate;
+            world.controls().autoRotate = autoRotate;
+            document.getElementById('rotateBtn').textContent =
+                autoRotate ? 'Stop Rotation' : 'Start Rotation';
+        });
+
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            if (confirm('Are you sure you want to reset your visited countries?')) {
+                visitedCountries.clear();
+                updateVisitedStats(countryFeatures);
+                world.polygonsData(world.polygonsData());
+            }
+        });
+
+        // Show loading spinner
+        document.getElementById('loading').classList.remove('hidden');
+
+        // Fetch country data - use optimized dataset for better performance
+        fetch('https://raw.githubusercontent.com/vasturiano/globe.gl/master/example/datasets/ne_110m_admin_0_countries.geojson')
+            .then(res => res.json())
+            .then(data => {
+                if (!data?.features) throw new Error('Invalid data');
+                countryFeatures = data.features;
+                
+                // Load the data with optimized settings
+                world.polygonsData(data.features);
+                
+                updateVisitedStats(data.features);
+                document.getElementById('loading').classList.add('hidden');
+            })
+            .catch(error => {
+                console.error('Error loading country data:', error);
+                document.getElementById('loading').classList.add('hidden');
+            });
+
+        // Set initial position
+        world.pointOfView({ lat: 39.6, lng: -98.5, altitude: 2.5 });
+
+        // Add extremely faint lighting for texture visibility
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.05);
+        world.scene().add(ambientLight);
+
+        // Optimize rendering performance
+        setTimeout(() => {
+            const renderer = world.renderer();
+            if (renderer) {
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio
+                renderer.antialias = false; // Disable antialiasing for better performance
+            }
+        }, 100);
+
+        // --- Responsive Globe Zoom/Drag for Mobile ---
+        // Globe.gl already supports drag/zoom, but let's ensure touch gestures are smooth
+        world.controls().enableDamping = true;
+        world.controls().dampingFactor = 0.08;
+        world.controls().enablePan = false;
+
+        // --- Texture Switching ---
+        const textureSelect = document.getElementById('textureSelect');
+        
+        textureSelect.addEventListener('change', function() {
+            const value = this.value;
+            
+            if (value === 'earth') {
+                // Apply Blue Marble with preferred brightness/contrast
+                const imageUrl = 'https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg';
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                
+                img.onload = function() {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    
+                    // Apply preferred brightness and contrast
+                    ctx.filter = 'brightness(0.3) contrast(1.1)';
+                    ctx.drawImage(img, 0, 0);
+                    
+                    // Update globe with modified texture
+                    world.globeImageUrl(canvas.toDataURL());
+                };
+                
+                img.onerror = function() {
+                    console.error('Failed to load Blue Marble texture');
+                    world.globeImageUrl(imageUrl); // Fallback to original
+                };
+                
+                img.src = imageUrl;
+            } else {
+                // No texture
+                world.globeImageUrl(null);
+            }
+        });
+    </script>
+</body>
+</html>
